@@ -12,14 +12,10 @@ using std::string;
 #define SCRHEIGHT 640
 #define SCRWIDTH 960
 
-#define OBSPOSMAX 16
+#define OBSMAX 16
 
 #define RADMAX 100
-#define BALLRAD 5
-
-#define PI 3.141592 
-
-#define DEBUG 1
+#define PI 3.141592653589
 
 enum eFlags {
 	NONE = 0,
@@ -33,58 +29,180 @@ enum eState {
 	OVER = 3
 };
 
+enum eDirection {
+	WEST = 0,
+	EAST = 1,
+	SOUTH = 2,
+	NORTH = 3,
+	DIRMAX = 4,
+};
+
 typedef struct sAxis {
 	int X;
 	int Y;
 }sAxis;
 
 typedef struct sDblAxis {
-	double X;
-	double Y;
+	float X;
+	float Y;
 } sDblAxis;
 
-const int white = GetColor(255, 255, 255);
+typedef struct sStatus {
+	float X;
+	float Y;
+	int RAD;
+} sStatus;
 
-class cObstacle {
+const unsigned int colWhite = GetColor(255, 255, 255);
+const unsigned int colGray = GetColor(150, 150, 150);
+
+float RadToDeg(float);
+sAxis GetInput(void);
+
+class cRipple {
     private:
-		sAxis obsPos = { 0, 0 };
-		int obsRad = 0;
+		sAxis sMousePos = { 0, 0 };
+		int rippleRad = 0, rippleExpandSpeed = 2;
+
+		int timer = 0, timeWait = (30 + 1);
+		sStatus sBallPos = { (float)SCRWIDTH / 2, (float)SCRHEIGHT / 2 , 5 };
+		float accRate = 8.0f;
+		sDblAxis sAcc = { 0.0f, -3.0f };
+		float gravity = 0.15f;
+
+		eFlags flag = NONE;
+
     public:
-		cObstacle(int index = 8) {
-			index = index % OBSPOSMAX;
-			obsRad = rand() % RADMAX;
-			obsPos = { SCRWIDTH + 100, obsPosData[index] };
-		};
-		void drawObstacle(void) {
-			DrawCircle(obsPos.X, obsPos.Y, obsRad, white, TRUE);
-			obsPos.X--;
+		cRipple() {
+
+		}
+		void ripple() {
+			timer += 1;
+			DrawCircle((int) sBallPos.X, (int) sBallPos.Y, sBallPos.RAD, colWhite); //ボール
+
+			GetMousePoint(&sMousePos.X, &sMousePos.Y); 
+
+			if (GetMouseInput() & MOUSE_INPUT_LEFT && !(flag & COLLISION)) {
+				timer = 1;
+				rippleRad = (rippleRad + rippleExpandSpeed) % RADMAX;
+				DrawCircle(sMousePos.X, sMousePos.Y, rippleRad, colWhite, FALSE);
+
+				if (sBallPos.RAD + rippleRad > sqrtf((sBallPos.X - sMousePos.X) * (sBallPos.X - sMousePos.X) + (sBallPos.Y - sMousePos.Y) * (sBallPos.Y - sMousePos.Y))) {
+					flag = COLLISION;
+
+					bounce(sMousePos.X, sMousePos.Y, rippleRad);
+
+				}
+			}
+			else {
+				rippleRad = 0;
+			}
+
+			if (sBallPos.Y < 0 || SCRHEIGHT < sBallPos.Y) {
+				sAcc.Y *= -1;
+			}
+			if (sBallPos.X < 0 || SCRWIDTH < sBallPos.X) {
+				sAcc.X *= -1;
+			}
+
+			if ((timer % timeWait) == 0) {
+				flag = NONE;
+			}
+
+			sAcc.Y += gravity;
+			sBallPos.X += sAcc.X;
+			sBallPos.Y += sAcc.Y;
+		}
+		sStatus showBallStatus(void){
+			return sBallPos;
+		}
+		void Debug(void) {
+			DrawLine((int) sBallPos.X, (int) sBallPos.Y, sMousePos.X, sMousePos.Y, colWhite); //アシスト表示
+
+			if (CheckHitKey(KEY_INPUT_SPACE)) {
+				sAcc.X = 0.0f;
+				sAcc.Y = -5.0f;
+			}
+			if (CheckHitKey(KEY_INPUT_B)) {
+				sBallPos.X = sBallPos.Y = 100;
+			}
+		}
+		void bounce(float x, float y, int power) {
+			double ballDegFromMouse = atan2(y - sBallPos.Y, x - sBallPos.X); //マウスから見たボールの角度 atanは座標から角度を求める
+			sAcc.X = -((cos(ballDegFromMouse) * power) / accRate);
+			sAcc.Y = -((sin(ballDegFromMouse) * power) / accRate);
 		}
 };
 
-double RadToDig(double);
-sAxis GetInput(void);
+class cObstacle {
+    private:
+		sAxis sObsPos = { 0, 0 };
+		unsigned short int ObsDirection = EAST;
+		int obsRad = 0;
+		int collisionCount = 0;
+		int movement = 0;
+    public:
+		cObstacle() : ObsDirection(rand() % DIRMAX), obsRad(20), movement(rand() % 11) {
+			switch (ObsDirection) {
+				case(EAST): //右から左
+					sObsPos = { SCRWIDTH + 100, rand() % SCRHEIGHT };
+					break;
+				case(WEST): //左から右
+					sObsPos = { -100, rand() % SCRHEIGHT };
+					break;
+				case(SOUTH): //下から上
+					sObsPos = { rand() % SCRWIDTH, SCRHEIGHT + 100 };
+					break;
+				case(NORTH): //上から下
+					sObsPos = { rand() % SCRWIDTH, -100 };
+					break;
+				default:
+					break;
+			}
+		};
+		void drawObstacle(void) {
+			DrawFormatString(0, 10, colWhite, "y座標: %d", sObsPos.Y);
+			switch (ObsDirection) {
+				case(EAST): //右から左
+					sObsPos.X = (sObsPos.X + movement) % (SCRWIDTH);
+					DrawCircle((SCRWIDTH - sObsPos.X), sObsPos.Y, obsRad, colWhite, TRUE);
+					break;
+				case(WEST): //左から右
+					sObsPos.X = (sObsPos.X + movement) % (SCRWIDTH);
+					DrawCircle(sObsPos.X, sObsPos.Y, obsRad, colWhite, TRUE);
+					break;
+				case(SOUTH): //下から上
+					sObsPos.Y = ((sObsPos.Y + movement) % (SCRHEIGHT));
+					DrawCircle(sObsPos.X, (SCRHEIGHT - sObsPos.Y), obsRad, colWhite, TRUE);
+					break;
+				case(NORTH): //上から下
+					sObsPos.Y = (sObsPos.Y + movement) % (SCRHEIGHT);
+					DrawCircle(sObsPos.X, sObsPos.Y, obsRad, colWhite, TRUE);
+					break;
+				default:
+					break;
+			}
+			
+		}
+		bool collision(sStatus ball) {
+			collisionCount++;
+			return (obsRad + ball.RAD) > sqrtf((sObsPos.X - ball.X) * (sObsPos.X - ball.X) + (sObsPos.Y - ball.Y) * (sObsPos.Y - ball.Y)) ? TRUE : FALSE;
+		}
+		sAxis showObsStatus(void) {
+			return sObsPos;
+		}
+};
 
 int APIENTRY WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPSTR lpCmdLine, _In_ int nCmdShow) {
 	if (DxLib_Init() == -1){
 		return -1;
 	}
 	srand((unsigned)time(NULL));
-
-	int rad = 0, radMod = rad, radSpeed = 2;
-	int ballColor = 255;
-	double ballATT = 0.0f;
-	int timer = 0, timeWait = (30 + 1);
-	unsigned short flag = NONE;
-	unsigned short state = MENU;
-	double dist = 0.0f;
-	double ballCos = 0.0f;
-	double ballSin = 0.0f;
-	sAxis sMouse = { 0, 0 };
-	sDblAxis sBall = { 250.0f, 250.0f };
-	double accRate = 8.0f;
-	sDblAxis sAcc = { 0.0f, -3.0f };
-	double gravity = 0.15;
+	eState state = MENU;
 	sAxis sInput = { 0, 0 };
+	
+	cRipple iPlayer;
+	cObstacle iObstacle[5];
 
 	SetWindowText("ClickRipple");
 	SetGraphMode(SCRWIDTH, SCRHEIGHT, 32);
@@ -93,121 +211,20 @@ int APIENTRY WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
 	SetDrawScreen(DX_SCREEN_BACK);
 	SetMouseDispFlag(TRUE);
 
-	/*while (!CheckHitKey(KEY_INPUT_ESCAPE)) {
-	DrawCircle(sBall.X, sBall.Y, BALLRAD, white);
-	ScreenFlip();
-	if (CheckHitKey(KEY_INPUT_SPACE)) {
-	sVel.Y += gravity;
-	sBall.X += sVel.X;
-	sBall.Y += sVel.Y;
-	}
-
-	if (sBall.Y > SCRHEIGHT) {
-	sVel.Y *= -1;
-	}
-	if (sBall.X < 0 || SCRWIDTH < sBall.X) {
-	sVel.X *= -1;
-	}
-
-	}*/ //ボールの演算のサンプル
-
-	//while (!CheckHitKey(KEY_INPUT_ESCAPE)) {
-	//	switch (state) {
-	//		case(TITLE):
-	//			ClearDrawScreen();
-	//			timer++;
-	//			SetFontSize(80);
-	//			DrawString(230, SCRHEIGHT / 3, "CLICK RIPPLE", white);//12字
-	//			if (timer < 30) {
-	//				SetFontSize(30);
-	//				DrawString(320, (SCRHEIGHT / 3) * 2, "Press SPACE to Start", white);//20字
-	//				//DrawFormatString(0, 0, white, "%d", timer);
-	//			}
-	//			else if (timer > 60) {
-	//				timer = 0;
-	//			}
-
-	//			if (CheckHitKey(KEY_INPUT_SPACE)) {
-	//				state = MENU;
-	//			}
-	//			break;
-	//		case(MENU):
-	//			ClearDrawScreen();
-	//			//sInput = GetInput();
-	//			//DrawFormatString(0, 0, white, "x: %d, y: %d", sInput.X, sInput.Y);
-	//			break;
-	//		case(PLAY):
-	//			break;
-	//		case(OVER):
-	//			break;
-	//	}
-	//	ScreenFlip();
-	//}
-
-	cObstacle test;
-
 	while (!CheckHitKey(KEY_INPUT_ESCAPE)) {
-		timer += 1;
 		ClearDrawScreen();
-		DrawCircle(sBall.X, sBall.Y, BALLRAD, white); //ボール
-		GetMousePoint(&sMouse.X, &sMouse.Y);
-		dist = sqrtf((sBall.X - sMouse.X) * (sBall.X - sMouse.X) + (sBall.Y - sMouse.Y) * (sBall.Y - sMouse.Y));
-		ballATT = atan2(sMouse.Y - sBall.Y, sMouse.X - sBall.X);
-		ballCos = cos(ballATT);
-		ballSin = sin(ballATT);
-		if (GetMouseInput() & MOUSE_INPUT_LEFT && !(flag & COLLISION)) {
-			timer = 1;
-			rad = (rad + radSpeed) % RADMAX;
-			DrawCircle(sMouse.X, sMouse.Y, rad, white, FALSE);
-			if (BALLRAD + rad > dist) {
-				flag = COLLISION;
-				if (ballCos < 0 && 0 < ballSin ) { //ボールがマウスの右方向
-					sAcc.X = -((ballCos * rad) / accRate);
-					sAcc.Y = -((ballSin * rad) / accRate);
-				}
-				else if(0 < ballSin){
-					sAcc.X = -((ballCos * rad) / accRate);
-					sAcc.Y = -((ballSin * rad) / accRate);
-				}
+		for (int i = 0; i < 5; i++) {
+			iObstacle[i].drawObstacle();
+		}
+		iPlayer.ripple();
+		iPlayer.Debug();
+		
+		for (int i = 0; i < 5; i++) {
+			if (iObstacle[i].collision(iPlayer.showBallStatus())) {
+				iPlayer.bounce(iObstacle[i].showObsStatus().X, iObstacle[i].showObsStatus().Y, 30);
 			}
 		}
-		else {
-			rad = 0;
-		}
-
-		sAcc.Y += gravity;
-		sBall.X += sAcc.X;
-		sBall.Y += sAcc.Y;
-
-		if (sBall.Y > SCRHEIGHT) {
-			sAcc = { 0, 0 };
-			DrawFormatString(SCRWIDTH / 3, SCRHEIGHT / 2, white, "GAME OVER!");
-		}
-		if (sBall.Y < 0) {
-			sAcc.Y *= -1;
-		}
-		if (sBall.X < 0 || SCRWIDTH < sBall.X) {
-			sAcc.X *= -1;
-		}
-
-		DrawLine(sBall.X, sBall.Y, sMouse.X, sMouse.Y, white); //アシスト表示
-#ifdef DEBUG
-		DrawFormatString(0, 0, white, "atan2の値: %f, 角度に直した値: %f", ballATT, RadToDig(ballATT));
-		DrawFormatString(0, 20, white, "ボールのcos(x座標): %f\nボールのsin(y座標)：%f", ballCos, ballSin);
-		DrawFormatString(0, 60, white, "%ボールとマウスの距離: %4f\nボールとマウスの半径の合計: %d リップルの半径: %d", dist, (BALLRAD + rad), rad);
-		DrawFormatString(0, 100, white, "マウス x: %d, y: %d, ボール x: %2f, y: %2f", sMouse.X, sMouse.Y, sBall.X, sBall.Y);
-		DrawFormatString(0, 120, white, "タイマー: %d, X軸加速度: %2f, Y軸加速度: %2f", timer, sAcc.X, sAcc.Y);
-
-		if (CheckHitKey(KEY_INPUT_SPACE)) {
-			sAcc.X = 0.0f;
-			sAcc.Y = -5.0f;
-		}
-#endif
-		if ((timer % timeWait) == 0) {
-			flag = NONE;
-		}
-
-		test.drawObstacle();
+		
 		ScreenFlip();
 	}
 
@@ -215,8 +232,8 @@ int APIENTRY WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
 	return 0;
 }
 
-double RadToDig(double rad) {
-	return (rad * 180) / PI;
+float RadToDeg(float rad) {
+	return (float) ((rad * 180) / PI);
 }
 
 
